@@ -18,12 +18,15 @@ export async function main(ns: NS) {
 
       const script = targetServer.getServerPropertiesInScript() + getScriptByName(scriptName, target);
 
-      await ns.write(scriptName, script, "w");
-      await ns.scp(scriptName, server.hostname);
-      
-      ns.killall(server.hostname);
       const threads = Math.floor(server.maxRam / ns.getScriptRam(scriptName));
-      ns.exec(scriptName, server.hostname, threads || 1);
+      if (threads > 0) {
+        await ns.write(scriptName, script, "w");
+        await ns.scp(scriptName, server.hostname);
+
+        ns.killall(server.hostname);
+        ns.exec(scriptName, server.hostname, threads);
+        await ns.sleep(100);
+      }
     } catch (err) {
       throw new Error(JSON.stringify(err, null, 2));
     }
