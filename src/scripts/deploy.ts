@@ -1,31 +1,36 @@
-import { NS } from "../NetscriptDefinitions.js";
-import { Server } from "./server";
+import { NS } from "../NetscriptDefinitions";
+import { discoverHosts, getServer, Servers } from "./discovery";
 
-const servers: Record<string, Server> = {};
-/** @param {NS} ns **/
 export async function main(ns: NS) {
   ns.clearLog();
-  const target = "joesguns";
-  const scriptName = "simple-hack.script";
 
-  crawlHost(ns);
-  const targetServer = servers[target];
+  const target = ns.args[0] as string;
+  if (ns.args.some((arg) => typeof arg !== "string")) {
+    throw new Error("Args must be strings");
+  }
 
+  const { servers, stats: serverStats } = discoverHosts(ns);
+
+  const scriptName = "simple.script";
+
+  const targetServer = getServer(target, servers);
+  const script = targetServer.getServerPropertiesInScript() + getScriptByName(scriptName)(target);
+
+  await ns.write(scriptName, script, "w");
   for (let host in servers) {
     try {
       const server = servers[host];
-      if (!server.isRoot) continue;
+      if (!server.hasAdminRights) continue;
 
-      const script = targetServer.getServerPropertiesInScript() + getScriptByName(scriptName, target);
-
-      const threads = Math.floor(server.maxRam / ns.getScriptRam(scriptName));
-      if (threads > 0) {
-        await ns.write(scriptName, script, "w");
+      const instances = Math.floor(server.maxRam / ns.getScriptRam(scriptName));
+      if (instances > 0) {
         await ns.scp(scriptName, server.hostname);
 
         ns.killall(server.hostname);
-        ns.exec(scriptName, server.hostname, threads);
-        await ns.sleep(100);
+        await ns.sleep(250);
+
+        ns.exec(scriptName, server.hostname, instances);
+        await ns.sleep(250);
       }
     } catch (err) {
       throw new Error(JSON.stringify(err, null, 2));
@@ -33,26 +38,17 @@ export async function main(ns: NS) {
   }
 }
 
-function crawlHost(ns: NS, host: string = "home"): Server[] {
-  const blacklist = ["darkweb"];
-
-  const hosts = ns.scan(host).filter((_host) => !blacklist.includes(_host));
-
-  if (servers[host]) return;
-  if (host !== "home") servers[host] = new Server(host, ns);
-
-  for (let _host of hosts) {
-    crawlHost(ns, _host);
+export function getScriptByName(name): (target, ...args: string[]) => string {
+  interface HackConfig {
+    use: boolean;
+    delay: number;
   }
-}
-
-export function getScriptByName(name: string, target: string): string {
   const scripts = {
     // 2.2gb ram with serverProperties inserted
-    "simple-hack.script": `
+    "simple.script": (target: string) => `
       var target = "${target}";
-      var moneyThresh = maxMoney * 0.75;
-      var securityThresh = minSecurityLevel + 5;
+      var moneyThresh = moneyMax * 0.75;
+      var securityThresh = minDifficulty + 5;
   
       while(true) {
           if (getServerSecurityLevel(target) > securityThresh) {
@@ -64,6 +60,35 @@ export function getScriptByName(name: string, target: string): string {
           }
       }
       `,
+
+    "delay-operator.js": (target, grow: HackConfig, weaken: HackConfig, hack: HackConfig) => `
+    /** @param {NS} ns **/
+    export async function main(ns) {
+      if("${grow.use}") sleep("${grow.delay}").then(() => grow("${target}")); 
+      if("${weaken.use}") sleep("${weaken.delay}").then(() => weaken(${target}")); 
+      if("${hack.use}") sleep("${hack.delay}").then(() => hack(${target}")); 
+    }
+      `,
+
+    "delay-grow.script": (target, delay) => `
+      var target = "${target}"
+      
+      sleep(${delay}) 
+      grow(target)
+      `,
+    "delay-weaken.script": (target, delay) => `
+      var target = "${target}"
+      
+      sleep(${delay}) 
+      weaken(target)
+      `,
+    "delay-hack.script": (target, delay) => `
+      var target = "${target}"
+      
+      sleep(${delay}) 
+      grow(target)
+      `,
   };
   return scripts[name];
 }
+("peirce ");

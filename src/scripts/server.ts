@@ -1,59 +1,36 @@
-import { NS } from "../NetscriptDefinitions";
+import { NS, Server } from "../NetscriptDefinitions";
 
-export class Server {
-  public portsOpen!: number;
-  public portsRequired!: number;
-  public hackingLevel!: number;
-  public maxMoney!: number;
-  public maxRam!: number;
-  public minSecurityLevel!: number;
-  public isRoot: boolean;
+interface AdditionalMethods {
+  getServerPropertiesInScript(): string;
+}
 
-  constructor(public hostname: string, private ns: NS) {
-    this.portsRequired = this.ns.getServerNumPortsRequired(this.hostname);
-    this.minSecurityLevel = this.ns.getServerMinSecurityLevel(this.hostname);
-    this.maxMoney = this.ns.getServerMaxMoney(this.hostname);
-    this.maxRam = this.ns.getServerMaxRam(this.hostname);
+export type EnrichedServer = Server & AdditionalMethods;
 
-    if (ns.hasRootAccess(this.hostname)) {
-      this.isRoot = true;
-      return;
-    } else {
-      this.isRoot = autoNook(ns, this);
-    }
-  }
+export function wrapServer(ns: NS, hostname: string): EnrichedServer {
+  // @ts-expect-error missing method
+  const server: EnrichedServer = ns.getServer(hostname);
 
-  // public async executeScript(
-  //   filename: string,
-  //   script: string,
-  //   threads: number,
-  //   ...args: string[]
-  // ): Promise<boolean> {
-  //   if (!this.ns.hasRootAccess(this.hostname)) return false;
+  if (!server.hasAdminRights) autoNook(ns, server);
 
-  //   await this.ns.write(filename, script, "w");
-  //   await this.ns.scp(filename, this.hostname);
-  //   this.ns.scriptKill(filename, this.hostname);
-  //   this.ns.exec(filename, this.hostname, threads, ...args);
-
-  //   return true;
-  // }
-
-  public getServerPropertiesInScript(): string {
+  server.getServerPropertiesInScript = function () {
     return (
       "\n" +
-      Object.keys({ ...this })
-        .filter((key) => !["ns", "key", "hostname"].includes(key))
+      Object.keys({ ...server })
+        .filter((key) => !["getServerPropertiesInScript"].includes(key))
         .map((key) => {
-          return 'var ' + key + " = " + this[key as keyof this] + "\n";
+          return (
+            "var " + key + " = " + (typeof server[key] === "string" ? `"${server[key]}"` : server[key]) + "\n"
+          );
         })
         .join("") +
       "\n\n"
     );
-  }
+  };
+
+  return server;
 }
 
-export function autoNook(ns: NS, server: Server): boolean {
+export function autoNook(ns: NS, server: Server): void {
   const programs = {
     "BruteSSH.exe": ns.brutessh,
     "FTPCrack.exe": ns.ftpcrack,
@@ -70,6 +47,6 @@ export function autoNook(ns: NS, server: Server): boolean {
       portsOpened++;
     }
   }
-  if (server.portsRequired <= portsOpened) ns.nuke(server.hostname);
-  return ns.hasRootAccess(server.hostname);
+  if (server.numOpenPortsRequired <= portsOpened) ns.nuke(server.hostname);
+  server.hasAdminRights = ns.hasRootAccess(server.hostname);
 }
